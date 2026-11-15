@@ -47,6 +47,13 @@ create policy "ler" on public.identidade for select to authenticated using (publ
 create policy "criar" on public.identidade for insert to authenticated with check (public.is_admin());
 create policy "editar" on public.identidade for update to authenticated using (public.is_admin()) with check (public.is_admin());
 
+-- permissões de acesso pela API (necessário se "Automatically expose new tables" estiver desligado)
+grant usage on schema public to authenticated;
+grant select on public.membros to authenticated;
+grant select, insert, update, delete on public.edificios, public.imoveis to authenticated;
+grant select, insert, update on public.identidade to authenticated;
+grant execute on function public.is_member(), public.is_admin() to authenticated;
+
 -- fotos (bucket privado)
 insert into storage.buckets (id, name, public) values ('fotos', 'fotos', false) on conflict (id) do nothing;
 drop policy if exists "fotos: ler" on storage.objects;
