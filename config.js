@@ -5,5 +5,5 @@
 window.SUPA_CFG = {
   url: 'https://cmghykkrtwrfkpxugctb.supabase.co',
   key: 'sb_publishable_7K5fuVYpPllARH8g0Eozhw_hJ892ug_',
-  email: 'COLE_AQUI_O_EMAIL_DA_EQUIPE'
+  email: 'felipefthome@gmail.com'
 };
