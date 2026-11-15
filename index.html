@@ -11,6 +11,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/htm@3.1.1/dist/htm.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>window.SUPA_CFG=window.SUPA_CFG||null;</script>
+<script src="config.js" onerror="void 0"></script>
 <style>
 :root{
   --deep:#06140F; --emerald:#0D3326; --gold:#C8A35A; --gold-l:#E9D3A0; --champ:#EAD9B5;
@@ -688,7 +690,40 @@ const idb={p:null,open(){return this.p||(this.p=new Promise((res,rej)=>{try{cons
   async get(id){const d=await this.open();return new Promise((res,rej)=>{const r=d.transaction('fotos').objectStore('fotos').get(id);r.onsuccess=()=>res(r.result||null);r.onerror=()=>rej(r.error)})}};
 const isLocalId=id=>String(id||'').startsWith('loc_');
 const newLocalId=()=>'loc_'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
-async function getBlob(id){if(isLocalId(id))return idb.get(id);const r=await fetch('/_blob/'+id);return r.ok?r.blob():null}
+/* ============ SUPABASE (versão GitHub Pages com biblioteca da equipe) ============ */
+async function initSupabase(){
+  const C=window.SUPA_CFG;if(!STANDALONE||!C||!C.url||!C.key||/COLE_AQUI/.test(C.url+C.key))return null;
+  if(!window.supabase)await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';s.onload=res;s.onerror=rej;document.head.appendChild(s)});
+  return window.supabase.createClient(C.url,C.key);
+}
+function supaErr(e){const m=(e&&e.message)||'';return{code:/row-level security|permission|policy/i.test(m)?'sem_permissao':/quota|exceed/i.test(m)?'quota_exceeded':'erro',message:m}}
+function supaDb(sb){
+  const L={edificios:new Set(),imoveis:new Set()};
+  const load=async k=>{const {data,error}=await sb.from(k).select('id,data,updated_at').order('updated_at',{ascending:false});if(error)throw supaErr(error);
+    const docs=data.map(r=>({id:r.id,exists:true,data:()=>r.data}));L[k].forEach(f=>f({docs,size:docs.length,empty:!docs.length,metadata:{fromCache:false,hasPendingWrites:false}}))};
+  const refresh=k=>load(k).catch(()=>{});
+  setInterval(()=>{for(const k in L)if(L[k].size)refresh(k)},30000);
+  window.addEventListener('focus',()=>{for(const k in L)if(L[k].size)refresh(k)});
+  const now=()=>new Date().toISOString();
+  const ref=(k,id)=>({id,
+    get:async()=>{const {data}=await sb.from(k).select('data').eq('id',id).maybeSingle();return{id,exists:!!data,data:()=>data?data.data:undefined}},
+    set:async d=>{const {error}=await sb.from(k).upsert({id,data:d,updated_at:now()});if(error)throw supaErr(error);refresh(k)},
+    update:async p=>{const {data}=await sb.from(k).select('data').eq('id',id).maybeSingle();const {error}=await sb.from(k).upsert({id,data:{...((data&&data.data)||{}),...p},updated_at:now()});if(error)throw supaErr(error);refresh(k)},
+    delete:async()=>{const {data,error}=await sb.from(k).delete().eq('id',id).select('id');if(error)throw supaErr(error);if(!data||!data.length)throw{code:'sem_permissao'};refresh(k)}});
+  const coll=k=>({doc:id=>ref(k,id||crypto.randomUUID()),onSnapshot:(next,err)=>{L[k].add(next);load(k).catch(e=>err&&err(e));return()=>L[k].delete(next)}});
+  const brand={get:async()=>{const {data}=await sb.from('identidade').select('data').eq('id',1).maybeSingle();return{exists:!!data,data:()=>data?data.data:undefined}},
+    set:async d=>{const {error}=await sb.from('identidade').upsert({id:1,data:d,updated_at:now()});if(error)throw supaErr(error)}};
+  return{doc:p=>/\/brand$/.test(p)?brand:{collection:coll}};
+}
+async function shrinkPhoto(blob){ // fotos grandes viram JPEG de até 3000 px (resolução de sobra para 1080 px com zoom); não altera o conteúdo
+  try{if(!/jpe?g|webp|heic/i.test(blob.type))return blob;const bm=await createImageBitmap(blob);const m=Math.max(bm.width,bm.height);if(m<=3000&&blob.size<4e6)return blob;
+    const sc=Math.min(1,3000/m),c=document.createElement('canvas');c.width=Math.round(bm.width*sc);c.height=Math.round(bm.height*sc);const x=c.getContext('2d');x.imageSmoothingQuality='high';x.drawImage(bm,0,0,c.width,c.height);
+    return await new Promise(r=>c.toBlob(b=>r(b||blob),'image/jpeg',.9))}catch(e){return blob}
+}
+function supaAssets(sb){return{upload:async blob=>{const b=await shrinkPhoto(blob);const ext={'image/jpeg':'jpg','image/png':'png','image/webp':'webp','image/svg+xml':'svg'}[b.type]||'jpg';const path=crypto.randomUUID()+'.'+ext;
+  const {error}=await sb.storage.from('fotos').upload(path,b,{contentType:b.type||'image/jpeg'});if(error)throw supaErr(error);return{id:'sb_'+path}}}}
+async function getBlob(id){if(String(id||'').startsWith('sb_')){if(!window.__sb)return null;const {data,error}=await window.__sb.storage.from('fotos').download(String(id).slice(3));return error?null:data}
+  if(isLocalId(id))return idb.get(id);const r=await fetch('/_blob/'+id);return r.ok?r.blob():null}
 const STANDALONE=!(window.claude&&window.claude.use); // fora do claude.ai (ex.: GitHub Pages)
 function thumbOf(img,w=480){try{const c=document.createElement('canvas');const iw=img.naturalWidth||img.width,ih=img.naturalHeight||img.height;c.width=w;c.height=Math.round(w*ih/iw);c.getContext('2d').drawImage(img,0,0,c.width,c.height);return c.toDataURL('image/jpeg',.72)}catch(e){return ''}}
 async function photoFromAsset(s){
@@ -758,6 +793,7 @@ function App(){
   const [bForm,setBForm]=useState(null);
   const [confirmDel,setConfirmDel]=useState(null);
   const [libStatus,setLibStatus]=useState('all');
+  const [auth,setAuth]=useState({email:'',pass:'',msg:'',busy:false});
   const [logoAdjs,setLogoAdjs]=useState(()=>(draft&&draft.logoAdjs)||(storedBrand&&storedBrand.logoAdjs)||{});
   const [open,setOpen]=useState({lib:true,m:true,f:true,i:true,c:true,b:false});
   const [fontsReady,setFontsReady]=useState(0);
@@ -785,16 +821,25 @@ function App(){
   useEffect(()=>{fetch(DEFAULT_LOGO_URL).then(r=>r.ok?r.blob():null).then(b=>b?logoFromBlob(b):null).then(l=>applyLogoP(l,1)).catch(()=>{})},[]);
   useEffect(()=>{const d=ls.get(LS_LOGO);if(d){fetch(d).then(r=>r.blob()).then(logoFromBlob).then(l=>applyLogoP(l,2)).catch(()=>{})}},[]);
   useEffect(()=>{let alive=true;(async()=>{
-    const [db,user,assets,downloads]=await Promise.all(['db','user','assets','downloads'].map(useCap));
-    Object.assign(caps,{db,user,assets,downloads});
-    if(user){try{caps.uid=await timeout(user.id(),10000)}catch(e){caps.uid=null}}
-    if(!alive)return;setCapInfo({cloud:!!(db&&caps.uid),checked:true,assets:!!assets});
+    let db,user,assets,downloads;
+    const sb=await initSupabase().catch(()=>null);
+    if(sb){window.__sb=sb;let email=null,papel=null;
+      try{const {data:{session}}=await sb.auth.getSession();if(session){email=(session.user.email||'').toLowerCase();const {data}=await sb.from('membros').select('papel').eq('email',email).maybeSingle();papel=data?data.papel:null}}catch(e){}
+      if(papel){db=supaDb(sb);assets=supaAssets(sb);caps.uid='equipe'}
+      Object.assign(caps,{db,assets,downloads:null});if(!alive)return;
+      setCapInfo({cloud:!!papel,checked:true,assets:!!papel,supa:{email,papel}});
+    }else{
+      [db,user,assets,downloads]=await Promise.all(['db','user','assets','downloads'].map(useCap));
+      Object.assign(caps,{db,user,assets,downloads});
+      if(user){try{caps.uid=await timeout(user.id(),10000)}catch(e){caps.uid=null}}
+      if(!alive)return;setCapInfo({cloud:!!(db&&caps.uid),checked:true,assets:!!assets});
+    }
     if(db&&caps.uid){try{
       const snap=await timeout(db.doc(`data/users/${caps.uid}/brand`).get(),10000);
       if(snap&&snap.exists){const b=snap.data()||{};
         if(b.colors2)setColors({...DEFAULT_COLORS,...b.colors2});if(b.logoAdjs&&!(draft&&draft.logoAdjs))setLogoAdjs(b.logoAdjs);if(b.logoMode)setLogoMode(b.logoMode);if(typeof b.keyBg==='boolean')setKeyBg(b.keyBg);
         if(b.tpl&&!draft)setTpl(b.tpl);if(b.fmt&&!draft)setFmt(b.fmt);
-        if(b.logoAssetId){setLogoAssetId(b.logoAssetId);try{const r=await fetch('/_blob/'+b.logoAssetId);if(r.ok)applyLogoP(await logoFromBlob(await r.blob()),3)}catch(e){}}
+        if(b.logoAssetId){setLogoAssetId(b.logoAssetId);try{const bl=await getBlob(b.logoAssetId);if(bl)applyLogoP(await logoFromBlob(bl),3)}catch(e){}}
       }
     }catch(e){}}
   })();return()=>{alive=false}},[]);
@@ -879,7 +924,14 @@ function App(){
     }catch(e){setBusy('');say('Arquivo de backup inválido ou incompleto.')}
   };
   const setStatusOf=async(d,st)=>{try{if(capInfo.cloud)await libRoot().collection('imoveis').doc(d.id).update({status:st});else{const {id,...rest}=d;localSave('imoveis',id,{...rest,status:st})}if(cur.id===d.id)setCur(c=>({...c,status:st}))}catch(e){say('Não foi possível mudar o status.')}};
-  const doDelete=async()=>{const d=confirmDel;setConfirmDel(null);try{await delDoc(d.kind,d.id);if(d.kind==='imoveis'&&cur.id===d.id)setCur(c=>({...c,id:null}));say('Excluído.')}catch(e){say('Não foi possível excluir.')}};
+  const doDelete=async()=>{const d=confirmDel;setConfirmDel(null);try{await delDoc(d.kind,d.id);if(d.kind==='imoveis'&&cur.id===d.id)setCur(c=>({...c,id:null}));say('Excluído.')}catch(e){say(e&&e.code==='sem_permissao'?'Só o administrador pode excluir cadastros.':'Não foi possível excluir.')}};
+  const canDelete=!capInfo.supa||capInfo.supa.papel==='admin';
+  const doLogin=async create=>{const sb=window.__sb;if(!sb)return;const email=auth.email.trim().toLowerCase();if(!email||auth.pass.length<6){setAuth(a=>({...a,msg:'Informe o e-mail e uma senha com pelo menos 6 caracteres.'}));return}
+    setAuth(a=>({...a,busy:true,msg:''}));
+    try{if(create){const {data,error}=await sb.auth.signUp({email,password:auth.pass,options:{emailRedirectTo:location.href.split('#')[0]}});if(error)throw error;if(!data.session){setAuth(a=>({...a,busy:false,msg:'Acesso criado. Abra o e-mail de confirmação que o Supabase enviou, confirme e depois toque em Entrar.'}));return}}
+      else{const {error}=await sb.auth.signInWithPassword({email,password:auth.pass});if(error)throw error}
+      location.reload()}catch(e){const m=(e&&e.message)||'';setAuth(a=>({...a,busy:false,msg:/Invalid login/i.test(m)?'E-mail ou senha incorretos.':/not confirmed/i.test(m)?'Confirme o e-mail antes de entrar (veja a caixa de entrada).':/already registered/i.test(m)?'Esse e-mail já tem acesso: use Entrar.':'Não foi possível: '+m}))}};
+  const doLogout=async()=>{try{await window.__sb.auth.signOut()}catch(e){}location.reload()};
   const q=libQ.trim().toLowerCase();
   const fImoveis=lib.imoveis.filter(d=>libStatus==='all'||(d.status||'disponivel')===libStatus).filter(d=>!q||[d.nome,edName(d.edificioId),d.info&&d.info.bairro].join(' ').toLowerCase().includes(q));
   const fEdificios=lib.edificios.filter(b=>!q||[b.nome,b.bairro,b.cidade].join(' ').toLowerCase().includes(q));
@@ -932,6 +984,7 @@ function App(){
     }catch(e){say('Não foi possível ler a logo.')}
   };
   const saveBrand=async()=>{
+    if(capInfo.supa&&capInfo.cloud&&capInfo.supa.papel!=='admin'){ls.set(LS_BRAND,JSON.stringify({colors2:colors,logoMode:logoMode||mode,logoAdjs,tpl,fmt,colors}));setSaveState('local');say('Só o administrador altera a identidade da equipe. Seu ajuste ficou salvo neste aparelho.');return}
     const b={colors2:colors,logoMode:logoMode||mode,logoAdjs,keyBg:useKey,tpl,fmt,logoAssetId:logoAssetId||null};
     ls.set(LS_BRAND,JSON.stringify({...b,colors}));setSaveState('saving');
     if(caps.db&&caps.uid){try{await caps.db.doc(`data/users/${caps.uid}/brand`).set({...b,updatedAt:new Date().toISOString()});setSaveState('cloud');say('Identidade salva na sua conta.');return}catch(e){}}
@@ -995,6 +1048,15 @@ function App(){
     <main className=${'main '+(mtab==='edit'?'showEdit':'showPrev')}>
       <aside className="editor">
         <${Section} n="◆" title="Biblioteca de imóveis" open=${open.lib} onToggle=${tog('lib')}>
+          ${capInfo.supa&&html`<div style=${{padding:10,border:'1px solid var(--line)',background:capInfo.cloud?'#F1F8F3':'#FBF7EE',marginBottom:10,fontSize:12}}>
+            ${capInfo.supa.email?html`<div style=${{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}><span>${capInfo.cloud?'☁':'⚠'} <b>${capInfo.supa.email}</b>${capInfo.supa.papel?` · ${capInfo.supa.papel==='admin'?'Administrador':'Membro'} da equipe`:''}</span><button className="btn ghost" style=${{marginLeft:'auto'}} onClick=${doLogout}>Sair</button></div>
+              ${!capInfo.cloud&&html`<div className="hint" style=${{color:'#9A4B2B'}}>Este e-mail ainda não foi liberado na equipe. Peça ao administrador para incluí-lo na tabela “membros” do Supabase. Enquanto isso, os cadastros ficam só neste aparelho.</div>`}`
+            :html`<b style=${{display:'block',marginBottom:6,color:'var(--emerald)'}}>Entrar na biblioteca da equipe</b>
+              <div className="row"><input className="inp" type="email" autocomplete="email" placeholder="E-mail" value=${auth.email} onInput=${e=>{const v=e.target.value;setAuth(a=>({...a,email:v}))}}/><input className="inp" type="password" autocomplete="current-password" placeholder="Senha" value=${auth.pass} onInput=${e=>{const v=e.target.value;setAuth(a=>({...a,pass:v}))}}/></div>
+              <div className="libbar"><button className="btn light" disabled=${auth.busy} onClick=${()=>doLogin(false)}>${auth.busy?'Aguarde…':'Entrar'}</button><button className="btn ghost" disabled=${auth.busy} onClick=${()=>doLogin(true)}>Criar acesso</button></div>
+              ${auth.msg&&html`<div className="hint" style=${{color:'#9A4B2B'}}>${auth.msg}</div>`}
+              <div className="hint">Sem entrar, o app funciona normalmente e salva só neste aparelho.</div>`}
+          </div>`}
           <div className="libcur"><div style=${{flex:1,minWidth:0}}><small>${cur.id?'Imóvel salvo · editando':'Imóvel novo · ainda não salvo'}</small><b style=${{whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>${(cur.nome||'').trim()||'Sem identificação'}</b>${cur.edificioId&&edName(cur.edificioId)?html`<span>Edifício: ${edName(cur.edificioId)}</span>`:null}</div></div>
           <div className="row"><div><label className="lbl">Identificação interna</label><input className="inp" maxLength="60" placeholder="Ex.: Lilás — Apto 302 Garden" value=${cur.nome} onInput=${e=>{const v=e.target.value;setCur(c=>({...c,nome:v}))}}/></div>
             <div><label className="lbl">Edifício</label><select className="inp" value=${cur.edificioId} onChange=${e=>{const id=e.target.value;setCur(c=>({...c,edificioId:id}));const b=lib.edificios.find(x=>x.id===id);if(b)setInfo(s=>({...s,subtitle:s.subtitle||b.nome,bairro:s.bairro||b.bairro||'',cidade:s.cidade||b.cidade||''}))}}><option value="">— Nenhum —</option>${lib.edificios.map(b=>html`<option key=${b.id} value=${b.id}>${b.nome}</option>`)}</select></div></div>
@@ -1005,7 +1067,7 @@ function App(){
             ${cur.id&&html`<button className="btn light" onClick=${()=>saveImovel(true)}>Salvar como novo</button>`}
             <button className="btn light" onClick=${()=>{setLibTab('imoveis');setLibOpen(true)}}>Abrir biblioteca (${lib.imoveis.length})</button>
           </div>
-          <div className="hint">${capInfo.cloud?'Salva dados, fotos (com enquadramento e legendas) e a configuração da arte na sua conta. Cadastre os edifícios para começar cada novo imóvel já com nome, bairro, cidade e fotos.':capInfo.checked?'Sem conta do Claude: imóveis, edifícios e fotos ficam salvos neste aparelho/navegador. Para levar a outro aparelho, use Exportar/Importar backup na biblioteca.':'Conectando à sua conta…'}</div>
+          <div className="hint">${capInfo.cloud?(capInfo.supa?'Biblioteca da equipe: tudo o que for salvo aparece para todos os membros, em qualquer aparelho.':'Salva dados, fotos (com enquadramento e legendas) e a configuração da arte na sua conta.')+' Cadastre os edifícios para começar cada novo imóvel já com nome, bairro, cidade e fotos.':capInfo.checked?'Sem conta do Claude: imóveis, edifícios e fotos ficam salvos neste aparelho/navegador. Para levar a outro aparelho, use Exportar/Importar backup na biblioteca.':'Conectando à sua conta…'}</div>
         <//>
         <${Section} n="I" title="Peça, modelo e formato" open=${open.m} onToggle=${tog('m')}>
           <label className="lbl" style=${{marginTop:4}}>Tipo de peça</label>
@@ -1154,14 +1216,14 @@ function App(){
         ${fImoveis.length?html`<div className="lgrid">${fImoveis.map(d=>{const S=STATUS[d.status||'disponivel'];return html`<div key=${d.id} className="lcard" style=${d.status==='vendido'?{opacity:.72}:null}>
           <div className="th" style=${d.thumb?{backgroundImage:`url(${d.thumb})`,aspectRatio:'4/5'}:{aspectRatio:'4/5'}}>${d.layout&&d.layout.piece==='carousel'?html`<em>CARROSSEL</em>`:null}<em style=${{left:'auto',right:8,top:8,bottom:'auto',background:S.c,color:'#fff'}}>${S.l.toUpperCase()}</em></div>
           <div className="bd"><b>${d.nome}</b><span>${[edName(d.edificioId),d.info&&d.info.bairro].filter(Boolean).join(' · ')||'—'}</span><span>${(d.photos||[]).length} foto(s) · atualizado ${fmtDate(d.updatedAt)}</span></div>
-          <div className="ac"><button className="pri" onClick=${()=>openImovel(d)}>ABRIR</button><select style=${{fontSize:10,fontWeight:700,border:'1px solid var(--line)',background:'#fff',color:S.c,padding:'4px'}} value=${d.status||'disponivel'} onChange=${e=>setStatusOf(d,e.target.value)}>${Object.entries(STATUS).map(([k,v])=>html`<option key=${k} value=${k}>${v.l}</option>`)}</select><button className="del" onClick=${()=>setConfirmDel({kind:'imoveis',id:d.id,nome:d.nome})}>EXCLUIR</button></div></div>`})}</div>`
+          <div className="ac"><button className="pri" onClick=${()=>openImovel(d)}>ABRIR</button><select style=${{fontSize:10,fontWeight:700,border:'1px solid var(--line)',background:'#fff',color:S.c,padding:'4px'}} value=${d.status||'disponivel'} onChange=${e=>setStatusOf(d,e.target.value)}>${Object.entries(STATUS).map(([k,v])=>html`<option key=${k} value=${k}>${v.l}</option>`)}</select>${canDelete&&html`<button className="del" onClick=${()=>setConfirmDel({kind:'imoveis',id:d.id,nome:d.nome})}>EXCLUIR</button>`}</div></div>`})}</div>`
         :html`<div className="empty">${q||libStatus!=='all'?'Nada encontrado com esse filtro.':'Nenhum imóvel salvo ainda. Monte uma arte e use “Salvar imóvel”.'}</div>`}`
       :html`
         <div className="libbar" style=${{marginTop:0,marginBottom:12}}><button className="btn light" onClick=${()=>setBForm({id:null,nome:'',bairro:'',cidade:'',feature:'',featureIcon:'estrela',photos:[]})}>+ Cadastrar edifício</button></div>
         ${fEdificios.length?html`<div className="lgrid">${fEdificios.map(b=>html`<div key=${b.id} className="lcard">
           <div className="th" style=${b.thumb?{backgroundImage:`url(${b.thumb})`}:b.photos&&b.photos[0]&&!isLocalId(b.photos[0].assetId)?{backgroundImage:`url(/_blob/${b.photos[0].assetId})`}:null}></div>
           <div className="bd"><b>${b.nome}</b><span>${[b.bairro,b.cidade].filter(Boolean).join(' · ')||'—'}</span><span>${(b.photos||[]).length} foto(s) · ${lib.imoveis.filter(d=>d.edificioId===b.id).length} imóvel(is)</span></div>
-          <div className="ac"><button className="pri" onClick=${()=>newFromEdificio(b)}>NOVO IMÓVEL AQUI</button><button onClick=${()=>editEdificio(b)}>EDITAR</button><button className="del" onClick=${()=>setConfirmDel({kind:'edificios',id:b.id,nome:b.nome})}>EXCLUIR</button></div></div>`)}</div>`
+          <div className="ac"><button className="pri" onClick=${()=>newFromEdificio(b)}>NOVO IMÓVEL AQUI</button><button onClick=${()=>editEdificio(b)}>EDITAR</button>${canDelete&&html`<button className="del" onClick=${()=>setConfirmDel({kind:'edificios',id:b.id,nome:b.nome})}>EXCLUIR</button>`}</div></div>`)}</div>`
         :html`<div className="empty">${q?'Nada encontrado.':'Nenhum edifício cadastrado. Cadastre com nome, bairro, cidade e as fotos da fachada e áreas comuns.'}</div>`}`}
       <div className="mrow" style=${{marginTop:14,justifyContent:'space-between'}}>
         <div style=${{display:'flex',gap:8,flexWrap:'wrap'}}><button className="btn light" onClick=${exportLib}>Exportar backup (.zip)</button>
