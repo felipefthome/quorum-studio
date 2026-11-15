@@ -1,5 +1,5 @@
 -- QUORUM STUDIO · configuração do Supabase (rode uma vez no SQL Editor)
--- Antes de rodar: troque SEU_EMAIL_AQUI (no fim do arquivo) pelo e-mail que você vai usar para entrar no app.
+-- Antes de rodar: troque SEU_EMAIL_AQUI (no fim do arquivo) pelo e-mail do acesso único da equipe.
 
 create table if not exists public.membros (
   email text primary key,
@@ -56,6 +56,6 @@ create policy "fotos: ler" on storage.objects for select to authenticated using 
 create policy "fotos: enviar" on storage.objects for insert to authenticated with check (bucket_id = 'fotos' and public.is_member());
 create policy "fotos: excluir" on storage.objects for delete to authenticated using (bucket_id = 'fotos' and public.is_admin());
 
--- você como administrador (troque pelo seu e-mail, em minúsculas)
+-- acesso único da equipe (troque pelo e-mail da equipe, em minúsculas)
 insert into public.membros (email, papel) values (lower('SEU_EMAIL_AQUI'), 'admin')
   on conflict (email) do update set papel = 'admin';

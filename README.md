@@ -9,12 +9,10 @@ Site estático: basta o `index.html` e o `logo-quorum.png` na mesma pasta.
   Para levar de um aparelho a outro: Biblioteca → Exportar backup (.zip) → Importar backup no outro.
 - Limpar os dados do navegador apaga a biblioteca daquele aparelho: faça backups.
 
-## Biblioteca da equipe (Supabase)
+## Biblioteca da equipe (Supabase) — acesso único
 
 1. Crie um projeto no supabase.com.
-2. No SQL Editor, rode `supabase-setup.sql` (troque `SEU_EMAIL_AQUI` pelo e-mail do administrador).
-3. Cole a Project URL e a Publishable key em `config.js`.
-4. No app, use "Criar acesso" / "Entrar" na seção Biblioteca.
-5. Para incluir alguém: Table Editor → `membros` → nova linha com o e-mail (minúsculas) e papel `membro` ou `admin`.
-
-Membros cadastram e editam; só `admin` exclui e altera a identidade da marca.
+2. No SQL Editor, rode `supabase-setup.sql` (troque `SEU_EMAIL_AQUI` pelo e-mail da equipe).
+3. Em Authentication → Users → Add user → Create new user: o mesmo e-mail + uma senha forte, com "Auto Confirm User" marcado.
+4. Preencha `config.js` com a Project URL, a Publishable key e o e-mail da equipe.
+5. No app, Biblioteca → digite a senha da equipe → Entrar (uma vez por aparelho).
